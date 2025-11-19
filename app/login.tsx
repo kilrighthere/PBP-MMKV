@@ -1,6 +1,10 @@
+import { auth } from '@/config/firebaseConfig';
+import { saveUserData } from '@/utils/storage';
 import { useRouter } from 'expo-router';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     KeyboardAvoidingView,
     Platform,
@@ -17,8 +21,9 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Harap isi email dan password');
       return;
@@ -29,16 +34,59 @@ export default function LoginScreen() {
       return;
     }
 
-    Alert.alert(
-      'Berhasil', 
-      isLogin ? 'Login berhasil!' : 'Registrasi berhasil!',
-      [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/(tabs)')
-        }
-      ]
-    );
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        // Login dengan Firebase Auth
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        
+        // Simpan user data ke MMKV
+        saveUserData(user.uid, user.email || email, user.displayName || undefined);
+        
+        console.log('Login berhasil:', user.email);
+        Alert.alert('Berhasil', 'Login berhasil!');
+        router.replace('/home');
+      } else {
+        // Register dengan Firebase Auth
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        console.log('Registrasi berhasil:', userCredential.user.email);
+        Alert.alert('Berhasil', 'Registrasi berhasil! Silakan login.');
+        setIsLogin(true);
+        setPassword('');
+      }
+    } catch (error: any) {
+      console.error('Error:', error);
+      let errorMessage = 'Terjadi kesalahan';
+      
+      switch (error.code) {
+        case 'auth/invalid-email':
+          errorMessage = 'Email tidak valid';
+          break;
+        case 'auth/user-not-found':
+          errorMessage = 'User tidak ditemukan';
+          break;
+        case 'auth/wrong-password':
+          errorMessage = 'Password salah';
+          break;
+        case 'auth/email-already-in-use':
+          errorMessage = 'Email sudah terdaftar';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password terlalu lemah';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Koneksi internet bermasalah';
+          break;
+        default:
+          errorMessage = error.message;
+      }
+      
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -84,13 +132,18 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity 
-            style={styles.submitButton} 
+            style={[styles.submitButton, loading && styles.submitButtonDisabled]} 
             onPress={handleSubmit}
             activeOpacity={0.8}
+            disabled={loading}
           >
-            <Text style={styles.submitButtonText}>
-              {isLogin ? 'Masuk' : 'Daftar'}
-            </Text>
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.submitButtonText}>
+                {isLogin ? 'Masuk' : 'Daftar'}
+              </Text>
+            )}
           </TouchableOpacity>
 
           <View style={styles.toggleContainer}>
@@ -107,7 +160,9 @@ export default function LoginScreen() {
 
         <View style={styles.infoContainer}>
           <Text style={styles.infoText}>
-            💡 Untuk testing, isi email dan password apa saja (min 6 karakter)
+            💡 {isLogin 
+              ? 'Login menggunakan akun Firebase yang sudah terdaftar' 
+              : 'Daftar akun baru menggunakan Firebase Auth'}
           </Text>
         </View>
       </ScrollView>
@@ -178,6 +233,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#B0B0B0',
+    opacity: 0.6,
   },
   submitButtonText: {
     color: 'white',

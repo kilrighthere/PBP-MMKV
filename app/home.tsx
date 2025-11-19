@@ -1,72 +1,133 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  StatusBar,
-} from 'react-native';
+import { auth, db } from '@/config/firebaseConfig';
+import { clearUserData, getUserData } from '@/utils/storage';
 import { useRouter } from 'expo-router';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { addDoc, collection, getDocs, orderBy, query } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    RefreshControl,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
-// Dummy data mahasiswa
-const DUMMY_MAHASISWA = [
-  {
-    id: '1',
-    nim: '202101001',
-    nama: 'Budi Santoso',
-    jurusan: 'Teknik Informatika',
-    email: 'budi@example.com',
-  },
-  {
-    id: '2',
-    nim: '202101002',
-    nama: 'Siti Nurhaliza',
-    jurusan: 'Sistem Informasi',
-    email: 'siti@example.com',
-  },
-  {
-    id: '3',
-    nim: '202101003',
-    nama: 'Ahmad Rizki',
-    jurusan: 'Teknik Komputer',
-    email: 'ahmad@example.com',
-  },
-  {
-    id: '4',
-    nim: '202101004',
-    nama: 'Dewi Lestari',
-    jurusan: 'Teknik Informatika',
-    email: 'dewi@example.com',
-  },
-  {
-    id: '5',
-    nim: '202101005',
-    nama: 'Eko Prasetyo',
-    jurusan: 'Sistem Informasi',
-    email: 'eko@example.com',
-  },
-];
+interface Mahasiswa {
+  id: string;
+  nim: string;
+  nama: string;
+  prodi: string;
+  tahunMasuk: string
+  email: string;
+}
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [mahasiswa, setMahasiswa] = useState(DUMMY_MAHASISWA);
+  const [mahasiswa, setMahasiswa] = useState<Mahasiswa[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState('');
 
-  const onRefresh = () => {
+  useEffect(() => {
+    // Check MMKV first untuk performa lebih cepat
+    const userData = getUserData();
+    
+    if (userData.isLoggedIn) {
+      setUserEmail(userData.email || '');
+      console.log('📱 User sudah login (dari MMKV):', userData.email);
+    }
+
+    // Check auth state dari Firebase
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserEmail(user.email || '');
+        fetchMahasiswa();
+      } else {
+        // Jika tidak ada user di Firebase, clear MMKV dan redirect ke login
+        clearUserData();
+        router.replace('/login');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const fetchMahasiswa = async () => {
+    try {
+      setLoading(true);
+      const mahasiswaRef = collection(db, 'mahasiswa');
+      const q = query(mahasiswaRef, orderBy('nama', 'asc'));
+      const querySnapshot = await getDocs(q);
+      
+      const mahasiswaData: Mahasiswa[] = [];
+      querySnapshot.forEach((doc) => {
+        mahasiswaData.push({
+          id: doc.id,
+          ...doc.data()
+        } as Mahasiswa);
+      });
+      
+      setMahasiswa(mahasiswaData);
+      console.log('Data mahasiswa berhasil diambil:', mahasiswaData.length);
+    } catch (error: any) {
+      console.error('Error fetching mahasiswa:', error);
+      Alert.alert('Error', 'Gagal mengambil data mahasiswa: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-      console.log('Data refreshed!');
-    }, 1000);
+    await fetchMahasiswa();
+    setRefreshing(false);
   };
 
-  const handleLogout = () => {
-    router.replace('/login');
+  const handleLogout = async () => {
+    try {
+      // Clear MMKV storage
+      clearUserData();
+      
+      // Logout dari Firebase
+      await signOut(auth);
+      
+      console.log('✅ Logout berhasil');
+      router.replace('/login');
+    } catch (error: any) {
+      console.error('Error logout:', error);
+      Alert.alert('Error', 'Gagal logout: ' + error.message);
+    }
   };
 
-  const renderMahasiswaCard = ({ item }: { item: typeof DUMMY_MAHASISWA[0] }) => (
+  const handleSeedData = async () => {
+    const mahasiswaData = [
+      { nim: '202101001', nama: 'Budi Santoso', jurusan: 'Teknik Informatika', email: 'budi@example.com' },
+      { nim: '202101002', nama: 'Siti Nurhaliza', jurusan: 'Sistem Informasi', email: 'siti@example.com' },
+      { nim: '202101003', nama: 'Ahmad Rizki', jurusan: 'Teknik Komputer', email: 'ahmad@example.com' },
+      { nim: '202101004', nama: 'Dewi Lestari', jurusan: 'Teknik Informatika', email: 'dewi@example.com' },
+      { nim: '202101005', nama: 'Eko Prasetyo', jurusan: 'Sistem Informasi', email: 'eko@example.com' },
+    ];
+
+    try {
+      setLoading(true);
+      for (const data of mahasiswaData) {
+        await addDoc(collection(db, 'mahasiswa'), data);
+      }
+      Alert.alert('Berhasil', '5 data mahasiswa berhasil ditambahkan!');
+      await fetchMahasiswa();
+    } catch (error: any) {
+      console.error('Error seeding data:', error);
+      Alert.alert('Error', 'Gagal menambahkan data: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderMahasiswaCard = ({ item }: { item: Mahasiswa }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.avatarContainer}>
@@ -82,12 +143,16 @@ export default function HomeScreen() {
       
       <View style={styles.cardBody}>
         <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>📚 Jurusan</Text>
-          <Text style={styles.infoValue}>{item.jurusan}</Text>
-        </View>
-        <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>📧 Email</Text>
           <Text style={styles.infoValue}>{item.email}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>📚 Jurusan</Text>
+          <Text style={styles.infoValue}>{item.prodi}</Text>
+        </View>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>📅 Tahun Masuk</Text>
+          <Text style={styles.infoValue}>{item.tahunMasuk}</Text>
         </View>
       </View>
     </View>
@@ -101,6 +166,15 @@ export default function HomeScreen() {
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Memuat data...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -109,27 +183,52 @@ export default function HomeScreen() {
         <View>
           <Text style={styles.headerTitle}>Data Mahasiswa</Text>
           <Text style={styles.headerSubtitle}>
-            📱 Aplikasi Manajemen Mahasiswa
+            📱 {userEmail}
           </Text>
         </View>
       </View>
 
-      <FlatList
-        data={mahasiswa}
-        renderItem={renderMahasiswaCard}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContainer}
-        ListHeaderComponent={ListHeader}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#007AFF']}
-          />
-        }
-      />
+      {mahasiswa.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>📚</Text>
+          <Text style={styles.emptyTitle}>Belum Ada Data</Text>
+          <Text style={styles.emptySubtitle}>
+            Tambahkan data mahasiswa melalui Firebase Console
+          </Text>
+          <Text style={styles.emptyInfo}>
+            atau gunakan tombol "Tambah Data Dummy" di bawah
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={mahasiswa}
+          renderItem={renderMahasiswaCard}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+          ListHeaderComponent={ListHeader}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#007AFF']}
+            />
+          }
+        />
+      )}
 
       <View style={styles.footer}>
+        {mahasiswa.length === 0 && (
+          <TouchableOpacity 
+            style={styles.seedButton} 
+            onPress={handleSeedData}
+            activeOpacity={0.8}
+            disabled={loading}
+          >
+            <Text style={styles.seedButtonText}>
+              {loading ? '⏳ Menambahkan...' : '➕ Tambah Data Dummy'}
+            </Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity 
           style={styles.logoutButton} 
           onPress={handleLogout}
@@ -267,6 +366,55 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   logoutButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyText: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  emptyInfo: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  seedButton: {
+    backgroundColor: '#34C759',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  seedButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
