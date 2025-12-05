@@ -5,15 +5,15 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { addDoc, collection, getDocs, orderBy, query } from 'firebase/firestore';
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    RefreshControl,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface Mahasiswa {
@@ -33,28 +33,34 @@ export default function HomeScreen() {
   const [userEmail, setUserEmail] = useState('');
 
   useEffect(() => {
-    // Check MMKV first untuk performa lebih cepat
+    // Cek MMKV dulu sebagai source of truth
     const userData = getUserData();
     
-    if (userData.isLoggedIn) {
-      setUserEmail(userData.email || '');
-      console.log('📱 User sudah login (dari MMKV):', userData.email);
+    if (!userData.isLoggedIn) {
+      console.log('🚫 User belum login (dari MMKV)');
+      router.replace('/login');
+      return;
     }
 
-    // Check auth state dari Firebase
+    console.log('📱 User sudah login (dari MMKV):', userData.email);
+    setUserEmail(userData.email || '');
+    
+    // Fetch data mahasiswa
+    fetchMahasiswa();
+    
+    // Optional: Sync dengan Firebase Auth (tapi jangan auto logout)
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        setUserEmail(user.email || '');
-        fetchMahasiswa();
+        console.log('✅ Firebase Auth synced:', user.email);
       } else {
-        // Jika tidak ada user di Firebase, clear MMKV dan redirect ke login
-        clearUserData();
-        router.replace('/login');
+        console.log('⚠️ Firebase Auth belum ready, tapi MMKV masih valid');
+        // Jangan clearUserData() di sini!
       }
     });
 
     return () => unsubscribe();
   }, []);
+
 
   const fetchMahasiswa = async () => {
     try {
@@ -89,17 +95,19 @@ export default function HomeScreen() {
 
   const handleLogout = async () => {
     try {
-      // Clear MMKV storage
-      clearUserData();
-      
       // Logout dari Firebase
       await signOut(auth);
       
-      console.log('✅ Logout berhasil');
+      // Clear MMKV data
+      clearUserData();
+      
+      console.log('👋 Logout berhasil');
+      
+      // Redirect ke login
       router.replace('/login');
-    } catch (error: any) {
-      console.error('Error logout:', error);
-      Alert.alert('Error', 'Gagal logout: ' + error.message);
+    } catch (error) {
+      console.error('❌ Error saat logout:', error);
+      Alert.alert('Error', 'Gagal logout. Silakan coba lagi.');
     }
   };
 
